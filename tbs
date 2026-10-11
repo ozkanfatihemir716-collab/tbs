@@ -1,0 +1,1263 @@
+-- ==================== NOVE TSB ====================
+local ok, err = pcall(function()
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local IS_MOBILE = UserInputService.TouchEnabled and not GuiService.IsWindows
+local DEVICE_NAME = IS_MOBILE and "MOBİL" or "PC"
+
+-- ==================== AYARLAR ====================
+local Settings = {
+    WalkSpeed = 32, JumpPower = 60, HitboxSize = 5,
+    C1 = Color3.fromRGB(50, 200, 100),
+    C2 = Color3.fromRGB(150, 255, 80),
+    C3 = Color3.fromRGB(200, 255, 150),
+    AutoAdjust = true,
+    FpsSize = 96,
+    _BoostWalk = 1.0, _BoostJump = 1.0, _BoostHitbox = 1.0
+}
+
+-- ==================== STATE (HEPSİ AÇIK) ====================
+local G = {
+    Speed = true, Jump = true, ESP = true, Hitbox = true,
+    InfStamina = true, DodgeAttack = true, Dash = true,
+    Stick = true, NoRagdoll = true,
+    MovementAI = true, PerfMode = true,
+    LagTarget = nil
+}
+local espData = {}
+local movementData = {}
+local currentHitbox = nil
+local dashCooldown = 0
+local stickCooldown = 0
+local lagTimer = 0
+local fps = 0
+local frameCount = 0
+local timeAccum = 0
+local elapsedTime = 0
+
+-- ==================== 10 PERFORMANS ARTTIRICI (Gizli, Oto Açık) ====================
+local function perf1_ShadowsOff()
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.ShadowSoftness = 0
+    end)
+end
+
+local function perf2_ParticlesOff()
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") then
+                obj.Enabled = false
+            end
+        end
+    end)
+    -- Yeni eklenen parçacıkları da yakala
+    pcall(function()
+        workspace.DescendantAdded:Connect(function(obj)
+            if obj:IsA("ParticleEmitter") then
+                task.wait(0.1)
+                obj.Enabled = false
+            end
+        end)
+    end)
+end
+
+local function perf3_TrailsOff()
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Trail") then
+                obj.Enabled = false
+            end
+        end
+        workspace.DescendantAdded:Connect(function(obj)
+            if obj:IsA("Trail") then
+                task.wait(0.1)
+                obj.Enabled = false
+            end
+        end)
+    end)
+end
+
+local function perf4_BeamsOff()
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Beam") then
+                obj.Enabled = false
+            end
+        end
+    end)
+end
+
+local function perf5_FireSmokeOff()
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                obj.Enabled = false
+            end
+        end
+    end)
+end
+
+local function perf6_FogOff()
+    pcall(function()
+        Lighting.FogEnd = 100000
+        Lighting.FogStart = 0
+        Lighting.Atmosphere.Density = 0
+        Lighting.Atmosphere.Haze = 0
+    end)
+end
+
+local function perf7_SkySimplified()
+    pcall(function()
+        for _, obj in ipairs(Lighting:GetChildren()) do
+            if obj:IsA("Sky") then
+                obj:Destroy()
+            end
+        end
+    end)
+end
+
+local function perf8_LightingSimple()
+    pcall(function()
+        Lighting.Technology = Enum.Technology.Voxel
+        Lighting.Brightness = 2
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+    end)
+end
+
+local function perf9_TerrainDecorative()
+    pcall(function()
+        workspace.Terrain.Decoration = false
+    end)
+end
+
+local function perf10_LowQuality()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+end
+
+-- Tüm performans arttırıcıları çalıştır
+perf1_ShadowsOff()
+perf2_ParticlesOff()
+perf3_TrailsOff()
+perf4_BeamsOff()
+perf5_FireSmokeOff()
+perf6_FogOff()
+perf7_SkySimplified()
+perf8_LightingSimple()
+perf9_TerrainDecorative()
+perf10_LowQuality()
+
+print("✅ 10 performans arttırıcı aktif")
+
+-- ==================== FPS ====================
+RunService.Heartbeat:Connect(function(dt)
+    frameCount = frameCount + 1
+    timeAccum = timeAccum + dt
+    elapsedTime = elapsedTime + dt
+    if timeAccum >= 1 then
+        fps = math.floor(frameCount / timeAccum)
+        frameCount = 0
+        timeAccum = 0
+    end
+end)
+
+-- ==================== YARDIMCILAR ====================
+local function getHealthColor(hum)
+    local ratio = hum.Health / math.max(1, hum.MaxHealth)
+    if ratio > 0.6 then return Color3.fromRGB(100, 220, 150)
+    elseif ratio > 0.3 then return Color3.fromRGB(255, 200, 80)
+    else return Color3.fromRGB(255, 90, 90) end
+end
+
+local function getPlayerNameColor(p)
+    local d = movementData[p]
+    if not d then return Settings.C2 end
+    if d.aimbotUntil > elapsedTime then
+        return Color3.fromRGB(255, 165, 0)
+    end
+    if d.dashUntil > elapsedTime then
+        return Color3.fromRGB(255, 220, 0)
+    end
+    if G.PerfMode and d.avgSpeed and d.avgSpeed < 3 and d.lastMoveTime and (elapsedTime - d.lastMoveTime) > 3 then
+        return Color3.fromRGB(140, 160, 180)
+    end
+    return Settings.C2
+end
+
+local function ApplyAutoSettings()
+    if not Settings.AutoAdjust then
+        Settings._BoostWalk = 1.0; Settings._BoostJump = 1.0; Settings._BoostHitbox = 1.0
+        return
+    end
+    if IS_MOBILE then
+        Settings._BoostWalk = 1.15; Settings._BoostJump = 1.10; Settings._BoostHitbox = 1.15
+    else
+        if fps < 30 then
+            Settings._BoostWalk = 1.10; Settings._BoostJump = 1.05; Settings._BoostHitbox = 1.15
+        else
+            Settings._BoostWalk = 1.25; Settings._BoostJump = 1.20; Settings._BoostHitbox = 1.35
+        end
+    end
+end
+
+local function removeESPForPlayer(p)
+    local d = espData[p]
+    if d then
+        if d.bb then d.bb:Destroy() end
+        if d.hl then d.hl:Destroy() end
+        espData[p] = nil
+    end
+end
+
+local function cleanAllESP()
+    for p, _ in pairs(espData) do removeESPForPlayer(p) end
+    espData = {}
+end
+
+local function updateHitboxSize()
+    if currentHitbox and currentHitbox.Parent then
+        currentHitbox.Size = Vector3.new(5, 10, 2) * (Settings.HitboxSize * Settings._BoostHitbox)
+    end
+end
+
+local function removeHitbox()
+    if currentHitbox then
+        currentHitbox:Destroy()
+        currentHitbox = nil
+    end
+end
+
+local function createHitbox()
+    if currentHitbox then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local hb = Instance.new("Part")
+    hb.Name = "TSB_Hitbox"
+    hb.Size = Vector3.new(5, 10, 2) * (Settings.HitboxSize * Settings._BoostHitbox)
+    hb.CFrame = hrp.CFrame
+    hb.Transparency = 1
+    hb.CanCollide = false
+    hb.CanTouch = true
+    hb.Massless = true
+    hb.Anchored = false
+    hb.Parent = char
+    local w = Instance.new("WeldConstraint")
+    w.Part0 = hrp
+    w.Part1 = hb
+    w.Parent = hrp
+    currentHitbox = hb
+end
+
+ApplyAutoSettings()
+
+-- ==================== GUI ====================
+if PlayerGui:FindFirstChild("TSB_Hub") then
+    PlayerGui.TSB_Hub:Destroy()
+end
+
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "TSB_Hub"
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.Parent = PlayerGui
+
+local Main = Instance.new("Frame", Gui)
+Main.Size = UDim2.new(0, 300, 0, 500)
+Main.Position = UDim2.new(0.05, 0, 0.12, 0)
+Main.BackgroundColor3 = Color3.fromRGB(12, 18, 14)
+Main.BorderSizePixel = 0
+Main.Active = false
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 18)
+
+local MainStroke = Instance.new("UIStroke", Main)
+MainStroke.Thickness = 1.5
+MainStroke.Color = Settings.C1
+MainStroke.Transparency = 0.35
+
+-- ============ HEADER ============
+local Header = Instance.new("Frame", Main)
+Header.Size = UDim2.new(1, 0, 0, 68)
+Header.BackgroundColor3 = Color3.fromRGB(16, 24, 18)
+Header.BorderSizePixel = 0
+Header.Active = true
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 18)
+
+local HeaderGrad = Instance.new("UIGradient", Header)
+HeaderGrad.Color = ColorSequence.new(Settings.C1, Settings.C2)
+HeaderGrad.Transparency = NumberSequence.new(0.85)
+
+-- ============ YENİ LOGO: Dönen Diamond + Spark ============
+local LogoWrap = Instance.new("Frame", Header)
+LogoWrap.Size = UDim2.new(0, 48, 0, 48)
+LogoWrap.Position = UDim2.new(0, 14, 0.5, -24)
+LogoWrap.BackgroundTransparency = 1
+LogoWrap.Active = false
+
+-- Dış dönen diamond (kare, 45 derece dönük)
+local OuterDiamond = Instance.new("Frame", LogoWrap)
+OuterDiamond.Size = UDim2.new(1, 0, 1, 0)
+OuterDiamond.Position = UDim2.new(0, 0, 0, 0)
+OuterDiamond.AnchorPoint = Vector2.new(0.5, 0.5)
+OuterDiamond.BackgroundColor3 = Settings.C1
+OuterDiamond.BackgroundTransparency = 0.2
+OuterDiamond.BorderSizePixel = 0
+OuterDiamond.Rotation = 45
+Instance.new("UICorner", OuterDiamond).CornerRadius = UDim.new(0, 8)
+
+local OuterGrad = Instance.new("UIGradient", OuterDiamond)
+OuterGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Settings.C1),
+    ColorSequenceKeypoint.new(0.5, Settings.C2),
+    ColorSequenceKeypoint.new(1, Settings.C3)
+}
+
+-- Orta diamond
+local MidDiamond = Instance.new("Frame", LogoWrap)
+MidDiamond.Size = UDim2.new(0.72, 0, 0.72, 0)
+MidDiamond.Position = UDim2.new(0, 0, 0, 0)
+MidDiamond.AnchorPoint = Vector2.new(0.5, 0.5)
+MidDiamond.BackgroundColor3 = Color3.fromRGB(16, 26, 18)
+MidDiamond.BorderSizePixel = 0
+MidDiamond.Rotation = 45
+Instance.new("UICorner", MidDiamond).CornerRadius = UDim.new(0, 6)
+
+-- İç diamond
+local InnerDiamond = Instance.new("Frame", LogoWrap)
+InnerDiamond.Size = UDim2.new(0.5, 0, 0.5, 0)
+InnerDiamond.Position = UDim2.new(0, 0, 0, 0)
+InnerDiamond.AnchorPoint = Vector2.new(0.5, 0.5)
+InnerDiamond.BackgroundColor3 = Settings.C1
+InnerDiamond.BorderSizePixel = 0
+InnerDiamond.Rotation = 45
+Instance.new("UICorner", InnerDiamond).CornerRadius = UDim.new(0, 4)
+local InnerGrad = Instance.new("UIGradient", InnerDiamond)
+InnerGrad.Rotation = 45
+InnerGrad.Color = ColorSequence.new(Settings.C2, Settings.C3)
+
+-- N harfi
+local LogoN = Instance.new("TextLabel", LogoWrap)
+LogoN.Size = UDim2.new(0, 24, 0, 24)
+LogoN.Position = UDim2.new(0, 0, 0, 0)
+LogoN.AnchorPoint = Vector2.new(0.5, 0.5)
+LogoN.BackgroundTransparency = 1
+LogoN.Text = "N"
+LogoN.TextColor3 = Color3.fromRGB(255, 255, 255)
+LogoN.Font = Enum.Font.GothamBlack
+LogoN.TextSize = 20
+LogoN.ZIndex = 5
+
+-- Dönen shine
+local LogoShine = Instance.new("Frame", OuterDiamond)
+LogoShine.Size = UDim2.new(1, 0, 1, 0)
+LogoShine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+LogoShine.BorderSizePixel = 0
+LogoShine.ZIndex = 6
+LogoShine.Active = false
+Instance.new("UICorner", LogoShine).CornerRadius = UDim.new(0, 8)
+
+local ShineGrad = Instance.new("UIGradient", LogoShine)
+ShineGrad.Rotation = 25
+ShineGrad.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+ShineGrad.Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0, 1),
+    NumberSequenceKeypoint.new(0.45, 1),
+    NumberSequenceKeypoint.new(0.5, 0.15),
+    NumberSequenceKeypoint.new(0.55, 1),
+    NumberSequenceKeypoint.new(1, 1),
+})
+ShineGrad.Offset = Vector2.new(-1.5, 0)
+
+-- Logo animasyon loop
+task.spawn(function()
+    while LogoWrap.Parent do
+        task.wait(0.03)
+        -- Dıştaki diamond yavaş döner
+        OuterDiamond.Rotation = (OuterDiamond.Rotation + 0.5) % 360
+        -- İç diamond ters yöne döner
+        InnerDiamond.Rotation = (InnerDiamond.Rotation - 0.8) % 360
+        -- Gradient renk shift
+        OuterGrad.Rotation = (OuterGrad.Rotation + 2) % 360
+    end
+end)
+
+-- Shine sweep
+task.spawn(function()
+    while LogoShine.Parent do
+        ShineGrad.Offset = Vector2.new(-1.5, 0)
+        task.wait(2)
+        local t = 0
+        while t < 1 and LogoShine.Parent do
+            t = t + 0.06
+            ShineGrad.Offset = Vector2.new(-1.5 + t * 3, 0)
+            task.wait(0.02)
+        end
+    end
+end)
+
+-- Glow pulse
+task.spawn(function()
+    while OuterDiamond.Parent do
+        for i = 0, 1, 0.1 do
+            if not OuterDiamond.Parent then break end
+            OuterDiamond.BackgroundTransparency = 0.2 + i * 0.3
+            task.wait(0.04)
+        end
+        for i = 1, 0, -0.1 do
+            if not OuterDiamond.Parent then break end
+            OuterDiamond.BackgroundTransparency = 0.2 + i * 0.3
+            task.wait(0.04)
+        end
+    end
+end)
+
+-- Başlık
+local Title = Instance.new("TextLabel", Header)
+Title.Size = UDim2.new(1, -110, 0, 22)
+Title.Position = UDim2.new(0, 70, 0, 14)
+Title.BackgroundTransparency = 1
+Title.Text = "NOVE TSB"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBlack
+Title.TextSize = 17
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.ZIndex = 3
+
+local Subtitle = Instance.new("TextLabel", Header)
+Subtitle.Size = UDim2.new(1, -110, 0, 14)
+Subtitle.Position = UDim2.new(0, 70, 0, 36)
+Subtitle.BackgroundTransparency = 1
+Subtitle.Text = DEVICE_NAME .. " · Boost"
+Subtitle.TextColor3 = Color3.fromRGB(210, 240, 220)
+Subtitle.Font = Enum.Font.Gotham
+Subtitle.TextSize = 10
+Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+Subtitle.ZIndex = 3
+
+local CloseBtn = Instance.new("TextButton", Header)
+CloseBtn.Size = UDim2.new(0, 32, 0, 32)
+CloseBtn.Position = UDim2.new(1, -42, 0.5, -16)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(35, 55, 40)
+CloseBtn.BackgroundTransparency = 0.3
+CloseBtn.Text = "−"
+CloseBtn.TextColor3 = Color3.fromRGB(220, 240, 225)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 22
+CloseBtn.ZIndex = 4
+CloseBtn.AutoButtonColor = false
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(1, 0)
+
+-- SÜRÜKLEME
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+Header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
+        local conn
+        conn = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+                if conn then conn:Disconnect() end
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch then
+        local delta = input.Position - dragStart
+        Main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+local FloatBtn = Instance.new("TextButton", Gui)
+FloatBtn.Size = UDim2.new(0, 60, 0, 60)
+FloatBtn.Position = UDim2.new(0, 20, 0.5, -30)
+FloatBtn.BackgroundColor3 = Settings.C1
+FloatBtn.Text = "N"
+FloatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+FloatBtn.Font = Enum.Font.GothamBlack
+FloatBtn.TextSize = 26
+FloatBtn.Visible = false
+FloatBtn.AutoButtonColor = false
+Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(1, 0)
+local FloatGrad = Instance.new("UIGradient", FloatBtn)
+FloatGrad.Color = ColorSequence.new(Settings.C1, Settings.C2)
+
+CloseBtn.Activated:Connect(function()
+    Main.Visible = false
+    FloatBtn.Visible = true
+end)
+FloatBtn.Activated:Connect(function()
+    Main.Visible = true
+    FloatBtn.Visible = false
+end)
+
+-- FPS PANEL
+local FpsPanel = Instance.new("Frame", Gui)
+FpsPanel.Size = UDim2.new(0, Settings.FpsSize, 0, 28)
+FpsPanel.Position = UDim2.new(0, 12, 0, 12)
+FpsPanel.BackgroundColor3 = Color3.fromRGB(12, 18, 14)
+FpsPanel.BackgroundTransparency = 0.15
+FpsPanel.BorderSizePixel = 0
+FpsPanel.Active = false
+Instance.new("UICorner", FpsPanel).CornerRadius = UDim.new(0, 8)
+local FpsStroke = Instance.new("UIStroke", FpsPanel)
+FpsStroke.Thickness = 1.5
+FpsStroke.Color = Color3.fromRGB(100, 220, 150)
+FpsStroke.Transparency = 0.4
+
+local FpsDot = Instance.new("Frame", FpsPanel)
+FpsDot.Size = UDim2.new(0, 8, 0, 8)
+FpsDot.Position = UDim2.new(0, 8, 0.5, -4)
+FpsDot.BackgroundColor3 = Color3.fromRGB(100, 220, 150)
+FpsDot.BorderSizePixel = 0
+Instance.new("UICorner", FpsDot).CornerRadius = UDim.new(1, 0)
+
+local FpsText = Instance.new("TextLabel", FpsPanel)
+FpsText.Size = UDim2.new(1, -26, 1, 0)
+FpsText.Position = UDim2.new(0, 22, 0, 0)
+FpsText.BackgroundTransparency = 1
+FpsText.Text = "FPS: 60"
+FpsText.TextColor3 = Color3.fromRGB(100, 220, 150)
+FpsText.Font = Enum.Font.GothamBold
+FpsText.TextSize = 12
+FpsText.TextXAlignment = Enum.TextXAlignment.Left
+
+task.spawn(function()
+    while FpsPanel.Parent do
+        task.wait(0.5)
+        FpsText.Text = "FPS: " .. fps
+        local c
+        if fps >= 50 then c = Color3.fromRGB(100, 220, 150)
+        elseif fps >= 30 then c = Color3.fromRGB(255, 200, 80)
+        else c = Color3.fromRGB(255, 90, 90) end
+        FpsText.TextColor3 = c
+        FpsDot.BackgroundColor3 = c
+        FpsStroke.Color = c
+    end
+end)
+
+-- SEKMELER
+local TabBar = Instance.new("Frame", Main)
+TabBar.Size = UDim2.new(1, -24, 0, 40)
+TabBar.Position = UDim2.new(0, 12, 0, 78)
+TabBar.BackgroundColor3 = Color3.fromRGB(18, 26, 20)
+TabBar.BorderSizePixel = 0
+TabBar.Active = false
+Instance.new("UICorner", TabBar).CornerRadius = UDim.new(0, 10)
+
+local function makeTab(name, xPos, w)
+    local t = Instance.new("TextButton", TabBar)
+    t.Size = UDim2.new(w, -4, 1, -6)
+    t.Position = UDim2.new(xPos, 2, 0, 3)
+    t.BackgroundColor3 = Color3.fromRGB(26, 38, 30)
+    t.BackgroundTransparency = 1
+    t.TextColor3 = Color3.fromRGB(180, 220, 190)
+    t.Font = Enum.Font.GothamBold
+    t.TextSize = 10
+    t.Text = name
+    t.AutoButtonColor = false
+    Instance.new("UICorner", t).CornerRadius = UDim.new(0, 8)
+    return t
+end
+
+local CombatTab = makeTab("⚔ COMBAT", 0.00, 0.33)
+local MoveTab = makeTab("🏃 MOVE", 0.33, 0.33)
+local SettingsTab = makeTab("⚙ AYAR", 0.66, 0.33)
+
+local function setTabActive(tab, active)
+    if active then
+        tab.BackgroundTransparency = 0
+        tab.BackgroundColor3 = Settings.C1
+        tab.TextColor3 = Color3.fromRGB(20, 40, 25)
+    else
+        tab.BackgroundTransparency = 1
+        tab.TextColor3 = Color3.fromRGB(180, 220, 190)
+    end
+end
+
+local function makeContent()
+    local c = Instance.new("ScrollingFrame", Main)
+    c.Size = UDim2.new(1, -24, 1, -176)
+    c.Position = UDim2.new(0, 12, 0, 126)
+    c.BackgroundTransparency = 1
+    c.BorderSizePixel = 0
+    c.ScrollBarThickness = 4
+    c.ScrollBarImageColor3 = Settings.C1
+    c.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    c.CanvasSize = UDim2.new(0, 0, 0, 0)
+    c.Visible = false
+    c.Active = true
+    Instance.new("UIListLayout", c).Padding = UDim.new(0, 8)
+    return c
+end
+
+local CombatContent = makeContent()
+local MoveContent = makeContent()
+local SettingsContent = makeContent()
+CombatContent.Visible = true
+
+local function switchTab(tab)
+    CombatContent.Visible = (tab == "c")
+    MoveContent.Visible = (tab == "m")
+    SettingsContent.Visible = (tab == "s")
+    setTabActive(CombatTab, tab == "c")
+    setTabActive(MoveTab, tab == "m")
+    setTabActive(SettingsTab, tab == "s")
+end
+switchTab("c")
+CombatTab.Activated:Connect(function() switchTab("c") end)
+MoveTab.Activated:Connect(function() switchTab("m") end)
+SettingsTab.Activated:Connect(function() switchTab("s") end)
+
+-- TOGGLE
+local function CreateToggle(parent, text, emoji, callback, defaultState)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, 0, 0, 44)
+    btn.BackgroundColor3 = Color3.fromRGB(18, 26, 20)
+    btn.Text = ""
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+    local st = Instance.new("UIStroke", btn)
+    st.Thickness = 1
+    st.Color = Color3.fromRGB(40, 60, 45)
+
+    local ic = Instance.new("TextLabel", btn)
+    ic.Size = UDim2.new(0, 30, 1, 0)
+    ic.Position = UDim2.new(0, 12, 0, 0)
+    ic.BackgroundTransparency = 1
+    ic.Text = emoji
+    ic.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ic.Font = Enum.Font.GothamBold
+    ic.TextSize = 17
+    ic.Active = false
+
+    local tx = Instance.new("TextLabel", btn)
+    tx.Size = UDim2.new(1, -110, 1, 0)
+    tx.Position = UDim2.new(0, 46, 0, 0)
+    tx.BackgroundTransparency = 1
+    tx.Text = text
+    tx.TextColor3 = Color3.fromRGB(200, 225, 210)
+    tx.Font = Enum.Font.GothamBold
+    tx.TextSize = 12
+    tx.TextXAlignment = Enum.TextXAlignment.Left
+    tx.Active = false
+
+    local switchBg = Instance.new("Frame", btn)
+    switchBg.Size = UDim2.new(0, 42, 0, 22)
+    switchBg.Position = UDim2.new(1, -54, 0.5, -11)
+    switchBg.BackgroundColor3 = Color3.fromRGB(40, 60, 45)
+    switchBg.BorderSizePixel = 0
+    switchBg.Active = false
+    Instance.new("UICorner", switchBg).CornerRadius = UDim.new(1, 0)
+
+    local knob = Instance.new("Frame", switchBg)
+    knob.Size = UDim2.new(0, 16, 0, 16)
+    knob.Position = UDim2.new(0, 3, 0.5, -8)
+    knob.BackgroundColor3 = Color3.fromRGB(180, 200, 185)
+    knob.BorderSizePixel = 0
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+    local state = defaultState or false
+    local function upd()
+        if state then
+            btn.BackgroundColor3 = Color3.fromRGB(28, 45, 32)
+            st.Color = Settings.C1
+            tx.TextColor3 = Color3.fromRGB(255, 255, 255)
+            switchBg.BackgroundColor3 = Settings.C1
+            knob.Position = UDim2.new(1, -19, 0.5, -8)
+            knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(18, 26, 20)
+            st.Color = Color3.fromRGB(40, 60, 45)
+            tx.TextColor3 = Color3.fromRGB(200, 225, 210)
+            switchBg.BackgroundColor3 = Color3.fromRGB(40, 60, 45)
+            knob.Position = UDim2.new(0, 3, 0.5, -8)
+            knob.BackgroundColor3 = Color3.fromRGB(180, 200, 185)
+        end
+    end
+    btn.Activated:Connect(function()
+        state = not state
+        upd()
+        if callback then callback(state) end
+    end)
+    upd()
+    return btn
+end
+
+local function createSlider(parent, label, minV, maxV, currentVal, callback, suffix)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 50)
+    row.BackgroundColor3 = Color3.fromRGB(18, 26, 20)
+    row.BorderSizePixel = 0
+    row.Active = false
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
+    local rs = Instance.new("UIStroke", row)
+    rs.Thickness = 1
+    rs.Color = Color3.fromRGB(40, 60, 45)
+
+    local sfx = suffix or ""
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(1, -90, 0, 18)
+    lbl.Position = UDim2.new(0, 12, 0, 6)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = label .. ": " .. (math.floor(currentVal * 10) / 10) .. sfx
+    lbl.TextColor3 = Color3.fromRGB(200, 225, 210)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Active = false
+
+    local badge = Instance.new("Frame", row)
+    badge.Size = UDim2.new(0, 56, 0, 18)
+    badge.Position = UDim2.new(1, -68, 0, 6)
+    badge.BackgroundColor3 = Color3.fromRGB(32, 48, 36)
+    badge.BorderSizePixel = 0
+    badge.Active = false
+    Instance.new("UICorner", badge).CornerRadius = UDim.new(0, 6)
+    local bs = Instance.new("UIStroke", badge)
+    bs.Thickness = 1
+    bs.Color = Settings.C1
+    local valLbl = Instance.new("TextLabel", badge)
+    valLbl.Size = UDim2.new(1, 0, 1, 0)
+    valLbl.BackgroundTransparency = 1
+    valLbl.Text = tostring(math.floor(currentVal * 10) / 10) .. sfx
+    valLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    valLbl.Font = Enum.Font.GothamBold
+    valLbl.TextSize = 10
+    valLbl.Active = false
+
+    local dn = Instance.new("TextButton", row)
+    dn.Size = UDim2.new(0, 55, 0, 20)
+    dn.Position = UDim2.new(0, 12, 0, 27)
+    dn.BackgroundColor3 = Color3.fromRGB(80, 40, 55)
+    dn.Text = "−"
+    dn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    dn.Font = Enum.Font.GothamBold
+    dn.TextSize = 15
+    dn.AutoButtonColor = false
+    Instance.new("UICorner", dn).CornerRadius = UDim.new(0, 5)
+
+    local up = Instance.new("TextButton", row)
+    up.Size = UDim2.new(0, 55, 0, 20)
+    up.Position = UDim2.new(1, -67, 0, 27)
+    up.BackgroundColor3 = Color3.fromRGB(40, 75, 50)
+    up.Text = "+"
+    up.TextColor3 = Color3.fromRGB(255, 255, 255)
+    up.Font = Enum.Font.GothamBold
+    up.TextSize = 15
+    up.AutoButtonColor = false
+    Instance.new("UICorner", up).CornerRadius = UDim.new(0, 5)
+
+    local step = (maxV - minV) / 20
+    local function setV(v)
+        currentVal = v
+        valLbl.Text = tostring(math.floor(v * 10) / 10) .. sfx
+        lbl.Text = label .. ": " .. (math.floor(v * 10) / 10) .. sfx
+        callback(v)
+    end
+    dn.Activated:Connect(function() setV(math.max(minV, currentVal - step)) end)
+    up.Activated:Connect(function() setV(math.min(maxV, currentVal + step)) end)
+end
+
+-- MENÜ (HEPSİ VARSAYILAN AÇIK)
+CreateToggle(CombatContent, "ESP", "👁️", function(s)
+    G.ESP = s
+    if not s then cleanAllESP() end
+end, true)
+CreateToggle(CombatContent, "Movement AI (TSB)", "🧠", function(s) G.MovementAI = s end, true)
+CreateToggle(CombatContent, "Performans Modu", "📊", function(s) G.PerfMode = s end, true)
+CreateToggle(CombatContent, "Sınırsız Stamina", "🔋", function(s) G.InfStamina = s end, true)
+CreateToggle(CombatContent, "Saldırıdan Kaçma", "🥷", function(s) G.DodgeAttack = s end, true)
+CreateToggle(CombatContent, "Dash", "💨", function(s) G.Dash = s end, true)
+CreateToggle(CombatContent, "Yapışma", "🧲", function(s) G.Stick = s end, true)
+CreateToggle(CombatContent, "No Ragdoll", "🦴", function(s) G.NoRagdoll = s end, true)
+
+CreateToggle(MoveContent, "Speed", "⚡", function(s) G.Speed = s end, true)
+CreateToggle(MoveContent, "Jump", "🦘", function(s) G.Jump = s end, true)
+
+-- AYARLAR
+local function sectionLabel(parent, text)
+    local lbl = Instance.new("TextLabel", parent)
+    lbl.Size = UDim2.new(1, 0, 0, 20)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "── " .. text .. " ──"
+    lbl.TextColor3 = Settings.C2
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 10
+    lbl.TextXAlignment = Enum.TextXAlignment.Center
+    lbl.Active = false
+end
+
+sectionLabel(SettingsContent, "LAG BAS (RASTGELE)")
+local lagRow = Instance.new("Frame", SettingsContent)
+lagRow.Size = UDim2.new(1, 0, 0, 40)
+lagRow.BackgroundColor3 = Color3.fromRGB(18, 26, 20)
+lagRow.BorderSizePixel = 0
+lagRow.Active = false
+Instance.new("UICorner", lagRow).CornerRadius = UDim.new(0, 10)
+
+local lagBtn = Instance.new("TextButton", lagRow)
+lagBtn.Size = UDim2.new(0.5, -4, 1, -8)
+lagBtn.Position = UDim2.new(0, 4, 0, 4)
+lagBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 55)
+lagBtn.Text = "Lag Bas"
+lagBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+lagBtn.Font = Enum.Font.GothamBold
+lagBtn.TextSize = 12
+lagBtn.AutoButtonColor = false
+Instance.new("UICorner", lagBtn).CornerRadius = UDim.new(0, 6)
+
+local lagOffBtn = Instance.new("TextButton", lagRow)
+lagOffBtn.Size = UDim2.new(0.5, -4, 1, -8)
+lagOffBtn.Position = UDim2.new(0.5, 0, 0, 4)
+lagOffBtn.BackgroundColor3 = Color3.fromRGB(40, 75, 50)
+lagOffBtn.Text = "Lag Kapat"
+lagOffBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+lagOffBtn.Font = Enum.Font.GothamBold
+lagOffBtn.TextSize = 12
+lagOffBtn.AutoButtonColor = false
+Instance.new("UICorner", lagOffBtn).CornerRadius = UDim.new(0, 6)
+
+sectionLabel(SettingsContent, "MOD")
+local autoBtn = Instance.new("TextButton", SettingsContent)
+autoBtn.Size = UDim2.new(1, 0, 0, 40)
+autoBtn.BackgroundColor3 = Settings.AutoAdjust and Color3.fromRGB(28, 45, 32) or Color3.fromRGB(18, 26, 20)
+autoBtn.Text = ""
+autoBtn.BorderSizePixel = 0
+autoBtn.AutoButtonColor = false
+Instance.new("UICorner", autoBtn).CornerRadius = UDim.new(0, 8)
+local autoStroke = Instance.new("UIStroke", autoBtn)
+autoStroke.Thickness = 1
+autoStroke.Color = Settings.AutoAdjust and Settings.C1 or Color3.fromRGB(40, 60, 45)
+local autoTxt = Instance.new("TextLabel", autoBtn)
+autoTxt.Size = UDim2.new(1, -20, 1, 0)
+autoTxt.Position = UDim2.new(0, 12, 0, 0)
+autoTxt.BackgroundTransparency = 1
+autoTxt.Text = Settings.AutoAdjust and "Hidden Auto Boost [ON]" or "Manual Mode"
+autoTxt.TextColor3 = Settings.AutoAdjust and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 220, 210)
+autoTxt.Font = Enum.Font.GothamBold
+autoTxt.TextSize = 11
+autoTxt.TextXAlignment = Enum.TextXAlignment.Left
+autoTxt.Active = false
+autoBtn.Activated:Connect(function()
+    Settings.AutoAdjust = not Settings.AutoAdjust
+    autoBtn.BackgroundColor3 = Settings.AutoAdjust and Color3.fromRGB(28, 45, 32) or Color3.fromRGB(18, 26, 20)
+    autoStroke.Color = Settings.AutoAdjust and Settings.C1 or Color3.fromRGB(40, 60, 45)
+    autoTxt.Text = Settings.AutoAdjust and "Hidden Auto Boost [ON]" or "Manual Mode"
+    autoTxt.TextColor3 = Settings.AutoAdjust and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 220, 210)
+    ApplyAutoSettings()
+    if currentHitbox then updateHitboxSize() end
+end)
+
+sectionLabel(SettingsContent, "HAREKET")
+createSlider(SettingsContent, "Speed (base)", 16, 200, Settings.WalkSpeed, function(v) Settings.WalkSpeed = v end)
+createSlider(SettingsContent, "Jump (base)", 50, 300, Settings.JumpPower, function(v) Settings.JumpPower = v end)
+
+sectionLabel(SettingsContent, "HITBOX")
+createSlider(SettingsContent, "Size (base)", 1, 15, Settings.HitboxSize, function(v)
+    Settings.HitboxSize = v
+    if currentHitbox then updateHitboxSize() end
+end)
+
+sectionLabel(SettingsContent, "CAMERA")
+createSlider(SettingsContent, "Max Zoom", 128, 500, LocalPlayer.CameraMaxZoomDistance, function(v)
+    LocalPlayer.CameraMaxZoomDistance = v
+end)
+
+sectionLabel(SettingsContent, "FPS")
+createSlider(SettingsContent, "FPS Size", 80, 200, Settings.FpsSize, function(v)
+    Settings.FpsSize = v
+    FpsPanel.Size = UDim2.new(0, v, 0, 28)
+end, "px")
+
+-- ==================== LAG BAS (RASTGELE) ====================
+lagBtn.Activated:Connect(function()
+    -- Tüm oyuncular arasından rastgele seç
+    local candidates = {}
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            table.insert(candidates, p)
+        end
+    end
+    if #candidates == 0 then return end
+    local chosen = candidates[math.random(1, #candidates)]
+    G.LagTarget = chosen
+    lagBtn.Text = "Lag: " .. chosen.Name
+    lagBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+end)
+
+lagOffBtn.Activated:Connect(function()
+    G.LagTarget = nil
+    lagBtn.Text = "Lag Bas"
+    lagBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 55)
+end)
+
+-- Lag transfer heartbeat
+RunService.Heartbeat:Connect(function(dt)
+    if not G.LagTarget then return end
+    local tChar = G.LagTarget.Character
+    if not tChar then G.LagTarget = nil; return end
+    local tHrp = tChar:FindFirstChild("HumanoidRootPart")
+    if not tHrp then return end
+
+    lagTimer = lagTimer + dt
+    if lagTimer >= 0.05 then
+        lagTimer = 0
+        local randomOffset = Vector3.new(
+            math.random(-50, 50),
+            math.random(-20, 20),
+            math.random(-50, 50)
+        )
+        tHrp.CFrame = tHrp.CFrame * CFrame.new(randomOffset)
+    end
+end)
+
+-- ==================== GELİŞMİŞ MOVEMENT AI ====================
+RunService.Heartbeat:Connect(function(dt)
+    if not (G.MovementAI or G.PerfMode) then return end
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                local d = movementData[p]
+                if not d then
+                    d = {
+                        lastPos = hrp.Position,
+                        lastTime = elapsedTime,
+                        dashUntil = 0,
+                        aimbotUntil = 0,
+                        speed = 0,
+                        avgSpeed = 16,
+                        lastMoveTime = elapsedTime
+                    }
+                    movementData[p] = d
+                end
+                local dt2 = elapsedTime - d.lastTime
+                if dt2 >= 0.1 then
+                    local dist = (hrp.Position - d.lastPos).Magnitude
+                    local speed = dist / dt2
+                    d.speed = speed
+                    d.avgSpeed = d.avgSpeed * 0.7 + speed * 0.3
+
+                    if speed > 3 then d.lastMoveTime = elapsedTime end
+
+                    -- Speed/Dash/TP tespiti
+                    if speed > 30 and not hum.PlatformStand then
+                        d.dashUntil = elapsedTime + 3
+                    end
+
+                    -- Aimbot/Auto Parry
+                    if speed > 15 and d.avgSpeed > 10 then
+                        local lookDir = hrp.CFrame.LookVector
+                        local moveDir = (hrp.Position - d.lastPos).Unit
+                        if lookDir:Dot(moveDir) > 0.9 then
+                            d.aimbotUntil = elapsedTime + 2
+                        end
+                    end
+
+                    -- Infinite Jump
+                    if not hum.FloorMaterial and speed > 5 then
+                        d.aimbotUntil = elapsedTime + 1
+                    end
+
+                    d.lastPos = hrp.Position
+                    d.lastTime = elapsedTime
+                end
+            end
+        end
+    end
+    for p, _ in pairs(movementData) do
+        if not p.Parent or not p.Character then movementData[p] = nil end
+    end
+end)
+
+-- ==================== ANA LOOP ====================
+RunService.Heartbeat:Connect(function(dt)
+    local myChar = LocalPlayer.Character
+    if not myChar then return end
+    local myHrp = myChar:FindFirstChild("HumanoidRootPart")
+    local myHum = myChar:FindFirstChildOfClass("Humanoid")
+    if not myHrp or not myHum then return end
+
+    if G.Speed then
+        myHum.WalkSpeed = Settings.WalkSpeed * Settings._BoostWalk
+    else
+        myHum.WalkSpeed = 16
+    end
+    if G.Jump then
+        myHum.UseJumpPower = true
+        myHum.JumpPower = Settings.JumpPower * Settings._BoostJump
+    end
+
+    if myHum.Health <= 0 then return end
+
+    local nearest, minDist = nil, 200
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local root = p.Character:FindFirstChild("HumanoidRootPart")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if root and hum and hum.Health > 0 then
+                local dist = (myHrp.Position - root.Position).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    nearest = p
+                end
+            end
+        end
+    end
+
+    if G.Dash then
+        dashCooldown = dashCooldown - dt
+        if dashCooldown <= 0 and nearest and minDist < 1.5 then
+            local tHrp = nearest.Character:FindFirstChild("HumanoidRootPart")
+            if tHrp then
+                local frontPos = tHrp.Position + tHrp.CFrame.LookVector * 2
+                myHrp.CFrame = CFrame.lookAt(frontPos, tHrp.Position)
+                myHrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                dashCooldown = 0.4
+            end
+        end
+    end
+
+    if G.Stick then
+        stickCooldown = stickCooldown - dt
+        if stickCooldown <= 0 and nearest and minDist < 3.5 then
+            local tHrp = nearest.Character:FindFirstChild("HumanoidRootPart")
+            if tHrp then
+                local lookVec = tHrp.CFrame.LookVector
+                local hLook = Vector3.new(lookVec.X, 0, lookVec.Z)
+                if hLook.Magnitude < 0.01 then hLook = Vector3.new(0, 0, -1) end
+                hLook = hLook.Unit
+                local behindPos = tHrp.Position - hLook * 2.5
+                myHrp.CFrame = CFrame.lookAt(behindPos, behindPos + hLook)
+                myHrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                stickCooldown = 2
+            end
+        end
+    end
+end)
+
+-- DODGE
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if G.DodgeAttack then
+            local char = LocalPlayer.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then hrp.CFrame = hrp.CFrame * CFrame.new(0, 0, 0.3) end
+            end
+        end
+    end
+end)
+
+-- NO RAGDOLL
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if G.NoRagdoll then
+            local char = LocalPlayer.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    pcall(function()
+                        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+                        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                    end)
+                    local state = hum:GetState()
+                    if state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then
+                        pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+                    end
+                    if hum.PlatformStand then hum.PlatformStand = false end
+                end
+            end
+        end
+    end
+end)
+
+-- ==================== ESP ====================
+local function createESPForPlayer(p, char, head)
+    if not head then return end
+    local d = espData[p]
+    if d then
+        if d.character == char and d.bb and d.bb.Parent then return end
+        removeESPForPlayer(p)
+    end
+
+    local hl = Instance.new("Highlight")
+    hl.Name = "TSB_HL"
+    hl.Adornee = char
+    hl.FillTransparency = 0.7
+    hl.OutlineTransparency = 0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.FillColor = Settings.C2
+    hl.OutlineColor = Settings.C2
+    hl.Parent = char
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "TSB_BB"
+    bb.Adornee = head
+    bb.Size = UDim2.new(0, 120, 0, 44)
+    bb.StudsOffset = Vector3.new(0, 3, 0)
+    bb.AlwaysOnTop = true
+    bb.MaxDistance = 150
+    bb.LightInfluence = 0
+    bb.Parent = head
+
+    local nameLbl = Instance.new("TextLabel", bb)
+    nameLbl.Size = UDim2.new(1, 0, 0, 22)
+    nameLbl.Position = UDim2.new(0, 0, 0, 0)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Text = p.Name
+    nameLbl.TextColor3 = Settings.C2
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextSize = 14
+    nameLbl.Parent = bb
+
+    local hpLbl = Instance.new("TextLabel", bb)
+    hpLbl.Size = UDim2.new(1, 0, 0, 18)
+    hpLbl.Position = UDim2.new(0, 0, 0, 22)
+    hpLbl.BackgroundTransparency = 1
+    hpLbl.TextColor3 = Color3.fromRGB(100, 220, 150)
+    hpLbl.Font = Enum.Font.GothamBold
+    hpLbl.TextSize = 13
+    hpLbl.Text = "100 / 100"
+    hpLbl.Parent = bb
+
+    espData[p] = { bb = bb, hl = hl, character = char, nameLbl = nameLbl, hpLbl = hpLbl }
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if G.ESP then
+            for p, d in pairs(espData) do
+                if not p.Parent or not d.bb or not d.bb.Parent
+                   or not d.character or not d.character.Parent then
+                    removeESPForPlayer(p)
+                end
+            end
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer then
+                    local char = p.Character
+                    if char then
+                        local head = char:FindFirstChild("Head")
+                        local hum = char:FindFirstChildOfClass("Humanoid")
+                        if head and hum and hum.Health > 0 then
+                            local d = espData[p]
+                            if not d or d.character ~= char or not d.bb.Parent then
+                                createESPForPlayer(p, char, head)
+                                d = espData[p]
+                            end
+                            if d then
+                                if d.hpLbl and d.hpLbl.Parent then
+                                    d.hpLbl.Text = math.floor(hum.Health) .. " / " .. math.floor(hum.MaxHealth)
+                                    d.hpLbl.TextColor3 = getHealthColor(hum)
+                                end
+                                if d.nameLbl and d.nameLbl.Parent then
+                                    d.nameLbl.TextColor3 = getPlayerNameColor(p)
+                                end
+                            end
+                        elseif espData[p] then
+                            removeESPForPlayer(p)
+                        end
+                    elseif espData[p] then
+                        removeESPForPlayer(p)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    removeESPForPlayer(p)
+    movementData[p] = nil
+end)
+
+-- HITBOX
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    if G.Hitbox then
+        removeHitbox()
+        createHitbox()
+    end
+end)
+task.spawn(function()
+    task.wait(1)
+    if G.Hitbox then createHitbox() end
+end)
+
+-- STAMINA
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if G.InfStamina then
+            local char = LocalPlayer.Character
+            if char then
+                for _, name in ipairs({"Stamina", "stamina", "StaminaValue", "Energy", "energy"}) do
+                    local v = char:FindFirstChild(name, true)
+                    if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
+                        if v.Value < v.MaxValue then v.Value = v.MaxValue end
+                    end
+                end
+                local pg = LocalPlayer:FindFirstChild("PlayerGui")
+                if pg then
+                    for _, o in ipairs(pg:GetDescendants()) do
+                        if o:IsA("NumberValue") or o:IsA("IntValue") then
+                            if o.Name:lower():find("stamina") or o.Name:lower():find("energy") then
+                                if o.Value < o.MaxValue then o.Value = o.MaxValue end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- AUTOADJUST
+task.spawn(function()
+    while true do
+        task.wait(15)
+        if Settings.AutoAdjust then ApplyAutoSettings() end
+    end
+end)
+
+print("✅ NOVE TSB yüklendi - " .. DEVICE_NAME)
+
+end)
+
+if not ok then
+    warn("❌ NOVE TSB HATA: " .. tostring(err))
+end
